@@ -7,7 +7,7 @@ import plotly.express as px
 from datetime import datetime
 
 # ---------------------------------------------------------
-# 1. KONFIGURASI HALAMAN & STATE
+# 1. KONFIGURASI HALAMAN
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="Global AI E-Waste Detector Pro",
@@ -20,22 +20,22 @@ if "detection_history" not in st.session_state:
     st.session_state.detection_history = []
 
 # ---------------------------------------------------------
-# 2. SIDEBAR (KONFIGURASI API KEY)
+# 2. SIDEBAR CONFIGURATION
 # ---------------------------------------------------------
 with st.sidebar:
     st.title("⚡ AI Core Settings")
     st.caption("Universal E-Waste Detection System")
     
-    api_key = st.text_input("Masukkan Gemini API Key:", type="password", help="Dapatkan dari Google AI Studio")
+    api_key = st.text_input("Masukkan Gemini API Key:", type="password", help="Dapatkan API Key dari Google AI Studio")
     
     st.markdown("---")
     st.markdown("### 📋 Standar Klasifikasi")
     st.info("Menggunakan pedoman **UN Global E-Waste Monitor** untuk identifikasi bahaya dan daur ulang sampah elektronik.")
     st.markdown("---")
-    st.caption("v2.5 Pro — Auto-Model Fallback Enabled")
+    st.caption("v3.4 Pro — Universal Vision Engine")
 
 # ---------------------------------------------------------
-# 3. FUNGSI ANALISIS DENGAN AUTO-MODEL DISCOVERY (ANTI-404)
+# 3. FUNGSI ANALISIS GAMBAR E-WASTE (MULTI-MODEL FALLBACK)
 # ---------------------------------------------------------
 def analyze_ewaste_smart(image, key):
     genai.configure(api_key=key)
@@ -51,7 +51,7 @@ def analyze_ewaste_smart(image, key):
         "deskripsi": "Deskripsi mendalam mengenai objek yang teridentifikasi",
         "tingkat_bahaya": "Tinggi / Sedang / Rendah",
         "skor_bahaya": 8,
-        "bahan_berbahaya": ["Contoh: Timbal", "Raksasa", "Kadmium", "CFC/Freon"],
+        "bahan_berbahaya": ["Contoh: Timbal", "Raksa", "Kadmium", "CFC/Freon"],
         "potensi_logam_mulia": {
             "Emas (Au)": "Ada / Tidak ada / Tinggi",
             "Perak (Ag)": "Ada / Tidak ada / Sedang",
@@ -66,58 +66,39 @@ def analyze_ewaste_smart(image, key):
     }
     """
     
-    # 1. Dapatkan daftar model aktif langsung dari API Google
-    candidate_models = []
-    try:
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                candidate_models.append(m.name)
-    except Exception:
-        pass
-
-    # 2. Tambahkan daftar fallback manual jika list_models tidak mengembalikan nilai
-    fallback_list = [
+    # Urutan model vision yang akan dicoba satu per satu
+    models_to_try = [
         "gemini-2.5-flash",
         "gemini-2.0-flash",
-        "gemini-1.5-flash-latest",
         "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "models/gemini-2.5-flash",
-        "models/gemini-2.0-flash",
-        "models/gemini-1.5-flash"
+        "gemini-1.5-pro"
     ]
-    
-    for fb in fallback_list:
-        if fb not in candidate_models:
-            candidate_models.append(fb)
 
-    # 3. Iterasi mencoba model sampai menemukan yang sukses
     response = None
     last_error = ""
-    used_model_name = ""
+    used_model = ""
 
-    for model_name in candidate_models:
+    for m_name in models_to_try:
         try:
-            model = genai.GenerativeModel(model_name)
+            model = genai.GenerativeModel(m_name)
             res = model.generate_content([prompt, image])
             if res and res.text:
                 response = res
-                used_model_name = model_name
+                used_model = m_name
                 break
         except Exception as e:
             last_error = str(e)
             continue
 
     if response is None:
-        return None, None, f"Semua model gagal diakses. Error terakhir: {last_error}"
+        return None, None, f"Gagal menganalisis gambar. Detail error: {last_error}"
 
-    # 4. Parsing JSON
     try:
         clean_text = response.text.replace("```json", "").replace("```", "").strip()
         parsed_data = json.loads(clean_text)
-        return parsed_data, used_model_name, None
+        return parsed_data, used_model, None
     except Exception as e:
-        return None, used_model_name, f"Gagal menguraikan output AI menjadi JSON: {str(e)}"
+        return None, used_model, f"Gagal memproses format data AI: {str(e)}"
 
 # ---------------------------------------------------------
 # 4. TAMPILAN UTAMA APLIKASI
@@ -146,7 +127,7 @@ with tab1:
                 input_image = Image.open(uploaded_file)
                 
         if input_image:
-            st.image(input_image, caption="Gambar yang Siap Dianalisis", use_container_width=True)
+            st.image(input_image, caption="Gambar Siap Dianalisis", use_container_width=True)
             analyze_btn = st.button("🚀 Jalankan Analisis AI Universal", type="primary", use_container_width=True)
 
     with col_output:
@@ -158,13 +139,12 @@ with tab1:
             elif input_image is None:
                 st.warning("⚠️ **Gambar Belum Ada!** Ambil foto atau unggah gambar terlebih dahulu.")
             else:
-                with st.spinner("🧠 AI sedang memindai komponen dan menganalisis tingkat bahaya..."):
+                with st.spinner("🧠 Menganalisis gambar e-waste..."):
                     data, active_model, err = analyze_ewaste_smart(input_image, api_key)
                     
                     if err:
                         st.error(f"❌ {err}")
                     else:
-                        # Simpan ke Riwayat
                         st.session_state.detection_history.append({
                             "waktu": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "nama": data.get("nama_objek", "Tidak diketahui"),
@@ -176,19 +156,15 @@ with tab1:
                         
                         st.success(f"✅ **Berhasil Dianalisis** (Model Digunakan: `{active_model}`)")
                         
-                        # Ringkasan Utama
                         m1, m2, m3 = st.columns(3)
                         m1.metric("Perangkat Terdeteksi", data.get("nama_objek", "-"))
                         m2.metric("Tingkat Bahaya", data.get("tingkat_bahaya", "-"), delta=f"Skor {data.get('skor_bahaya', 0)}/10", delta_color="inverse")
                         m3.metric("Potensi Daur Ulang", f"{data.get('dapat_didaur_ulang_persen', 0)}%")
                         
                         st.markdown("---")
-                        
-                        # Rincian
                         st.markdown(f"**📂 Kategori UN E-Waste:** `{data.get('kategori_un', '-')}`")
                         st.markdown(f"**📝 Deskripsi Objek:** {data.get('deskripsi', '-')}")
                         
-                        # Bahan Berbahaya & Logam Mulia
                         col_a, col_b = st.columns(2)
                         with col_a:
                             st.markdown("🚨 **Bahan / Zat Berbahaya:**")
@@ -206,13 +182,12 @@ with tab1:
                         for idx, step in enumerate(data.get("instruksi_penanganan", []), 1):
                             st.write(f"**{idx}.** {step}")
 
-# --- TAB 2: DASHBOARD & RIWAYAT ---
+# --- TAB 2: DASHBOARD ---
 with tab2:
     st.subheader("📊 Rekapitulasi Deteksi E-Waste")
     
     if len(st.session_state.detection_history) > 0:
         df = pd.DataFrame(st.session_state.detection_history)
-        
         st.dataframe(df, use_container_width=True)
         
         c1, c2 = st.columns(2)
